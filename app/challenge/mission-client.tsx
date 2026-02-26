@@ -30,7 +30,7 @@ function decodePolyline(encoded: string): Array<[number, number]> {
       shift += 5;
     } while (b >= 0x20);
 
-    const deltaLat = (result & 1) ? ~(result >> 1) : result >> 1;
+    const deltaLat = result & 1 ? ~(result >> 1) : result >> 1;
     lat += deltaLat;
 
     shift = 0;
@@ -42,7 +42,7 @@ function decodePolyline(encoded: string): Array<[number, number]> {
       shift += 5;
     } while (b >= 0x20);
 
-    const deltaLng = (result & 1) ? ~(result >> 1) : result >> 1;
+    const deltaLng = result & 1 ? ~(result >> 1) : result >> 1;
     lng += deltaLng;
 
     coordinates.push([lat / 1e5, lng / 1e5]);
@@ -77,6 +77,34 @@ function formatHMS(totalSeconds: number): string {
   const sec = s % 60;
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+function nextSaturdayAt7am(now = new Date()): Date {
+  // JS: Sunday=0 ... Saturday=6
+  const d = new Date(now);
+  d.setMilliseconds(0);
+
+  const day = d.getDay();
+  const daysUntilSaturday = (6 - day + 7) % 7;
+
+  const target = new Date(d);
+  target.setDate(d.getDate() + daysUntilSaturday);
+  target.setHours(7, 0, 0, 0);
+
+  // If it's already Saturday and past 07:00, go to next Saturday
+  if (daysUntilSaturday === 0 && now.getTime() >= target.getTime()) {
+    target.setDate(target.getDate() + 7);
+  }
+  return target;
+}
+
+function formatCountdown(ms: number) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return { days, hours, minutes, seconds };
 }
 
 function getQueryParam(name: string): string | null {
@@ -131,6 +159,29 @@ export default function MissionClient() {
     return getQueryParam("pace") || process.env.NEXT_PUBLIC_GOAL_PACE || "4:45";
   });
 
+  // Countdown to next Saturday 07:00 (local)
+  const [countdownTarget, setCountdownTarget] = useState<Date>(() => nextSaturdayAt7am(new Date()));
+  const [msLeft, setMsLeft] = useState<number>(() => countdownTarget.getTime() - Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const now = new Date();
+
+      // roll the target forward if we've passed it
+      setCountdownTarget((prev) => (now.getTime() >= prev.getTime() ? nextSaturdayAt7am(now) : prev));
+
+      // compute ms left against the *latest* target (avoid stale closure)
+      setMsLeft(() => {
+        const target = countdownTarget;
+        return target.getTime() - now.getTime();
+      });
+    }, 250);
+
+    return () => window.clearInterval(id);
+  }, [countdownTarget]);
+
+  const cd = useMemo(() => formatCountdown(msLeft), [msLeft]);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const routeId = useMemo(() => getQueryParam("routeId"), []);
@@ -150,7 +201,9 @@ export default function MissionClient() {
         const data = await res.json();
 
         if (!res.ok) {
-          throw new Error(data?.error ? `${data.error}${data.details ? ` — ${data.details}` : ""}` : "Failed to load route");
+          throw new Error(
+            data?.error ? `${data.error}${data.details ? ` — ${data.details}` : ""}` : "Failed to load route"
+          );
         }
 
         if (!cancelled) {
@@ -229,7 +282,7 @@ export default function MissionClient() {
 
       <main className="relative z-10 max-w-5xl mx-auto px-6 py-14">
         <div className="flex items-center justify-between gap-4">
-          <div className="text-xs tracking-[0.35em] text-white/60">SYNCRA // TEAM RUN BRIEFING</div>
+          <div className="text-xs tracking-[0.35em] text-white/60">LONG RUN // TEAM RUN BRIEFING</div>
           <div className="text-xs text-white/50">{new Date().toLocaleString()}</div>
         </div>
 
@@ -238,12 +291,8 @@ export default function MissionClient() {
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
               <div>
                 <div className="text-sm text-white/60 tracking-[0.2em]">CLASSIFIED DOSSIER</div>
-                <h1 className="mt-3 text-3xl md:text-5xl font-semibold leading-tight">
-                  {title}
-                </h1>
-                <p className="mt-4 text-white/70 max-w-2xl">
-                  This message will self-destruct in spirit only. The legs will remember.
-                </p>
+                <h1 className="mt-3 text-3xl md:text-5xl font-semibold leading-tight">{title}</h1>
+                <p className="mt-4 text-white/70 max-w-2xl">This message will self-destruct in spirit only. The legs will remember.</p>
               </div>
 
               <div className="rounded-2xl border border-white/15 bg-black/40 p-4 w-full md:w-[320px]">
@@ -257,9 +306,7 @@ export default function MissionClient() {
                   />
                   <span className="text-xs text-white/50 whitespace-nowrap">e.g. 4:45</span>
                 </div>
-                {paceSeconds === null && (
-                  <div className="mt-2 text-xs text-rose-300/90">Use format mm:ss (e.g. 4:45)</div>
-                )}
+                {paceSeconds === null && <div className="mt-2 text-xs text-rose-300/90">Use format mm:ss (e.g. 4:45)</div>}
               </div>
             </div>
 
@@ -268,9 +315,33 @@ export default function MissionClient() {
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(52,211,153,0.9)]" />
               <span className="tracking-[0.25em]">UPLINK STABLE</span>
               <span className="text-white/30">/</span>
-              <span className="tracking-[0.25em]">
-                {route ? "ROUTE ACQUIRED" : error ? "ROUTE FAILED" : "ACQUIRING ROUTE…"}
-              </span>
+              <span className="tracking-[0.25em]">{route ? "ROUTE ACQUIRED" : error ? "ROUTE FAILED" : "ACQUIRING ROUTE…"} </span>
+            </div>
+
+            {/* Countdown */}
+            <div className="mt-6 rounded-2xl border border-white/15 bg-black/35 p-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-xs tracking-[0.35em] text-white/55">MISSION START</div>
+                  <div className="mt-2 text-lg font-semibold">
+                    Saturday · 07:00
+                    <span className="text-white/50 text-sm font-normal"> (local)</span>
+                  </div>
+                </div>
+
+                <span className="text-xs text-white/50 border border-white/15 bg-white/5 px-3 py-1 rounded-full">
+                  T-{Math.max(0, Math.ceil(msLeft / 1000))}s
+                </span>
+              </div>
+
+              <div className="mt-4 grid grid-cols-4 gap-3">
+                <CountdownBlock label="DAYS" value={cd.days} />
+                <CountdownBlock label="HRS" value={cd.hours} />
+                <CountdownBlock label="MIN" value={cd.minutes} />
+                <CountdownBlock label="SEC" value={cd.seconds} />
+              </div>
+
+              <div className="mt-4 text-xs text-white/55">Arrive warmed up. Lock pace early. No hero surges.</div>
             </div>
 
             {/* Main content */}
@@ -280,7 +351,9 @@ export default function MissionClient() {
                   <div className="text-white/70">
                     <div className="text-sm tracking-[0.25em] text-white/50">DECRYPTING</div>
                     <div className="mt-4 text-2xl font-semibold animate-pulse">Fetching your Strava route…</div>
-                    <div className="mt-3 text-sm text-white/50">Tip: add <span className="text-white/70">?routeId=123</span> to the URL.</div>
+                    <div className="mt-3 text-sm text-white/50">
+                      Tip: add <span className="text-white/70">?routeId=123</span> to the URL.
+                    </div>
                   </div>
                 )}
 
@@ -289,9 +362,7 @@ export default function MissionClient() {
                     <div className="text-sm tracking-[0.25em] text-rose-200/80">ERROR</div>
                     <div className="mt-3 text-lg font-semibold text-rose-100">Could not load route.</div>
                     <pre className="mt-3 text-xs text-white/60 whitespace-pre-wrap">{error}</pre>
-                    <div className="mt-4 text-sm text-white/60">
-                      Check env vars + route privacy (must be accessible via your token).
-                    </div>
+                    <div className="mt-4 text-sm text-white/60">Check env vars + route privacy (must be accessible via your token).</div>
                   </div>
                 )}
 
@@ -349,10 +420,7 @@ export default function MissionClient() {
                         Open route in Strava ↗
                       </a>
 
-                      <CopyLinkButton
-                        label="Share this briefing"
-                        getText={() => window.location.href}
-                      />
+                      <CopyLinkButton label="Share this briefing" getText={() => window.location.href} />
 
                       <CopyLinkButton
                         label="Share with pace"
@@ -371,18 +439,14 @@ export default function MissionClient() {
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <div className="text-sm tracking-[0.25em] text-white/50">TACTICAL MAP</div>
-                    <div className="mt-2 text-white/70 text-sm">
-                      Polyline render (no tiles). Clean. Fast. Shareable.
-                    </div>
+                    <div className="mt-2 text-white/70 text-sm">Polyline render (no tiles). Clean. Fast. Shareable.</div>
                   </div>
                   {route?.summary_polyline ? (
                     <span className="text-xs text-emerald-200/80 border border-emerald-200/30 bg-emerald-200/10 px-2 py-1 rounded-full">
                       SIGNAL LOCK
                     </span>
                   ) : (
-                    <span className="text-xs text-white/50 border border-white/15 bg-white/5 px-2 py-1 rounded-full">
-                      NO POLYLINE
-                    </span>
+                    <span className="text-xs text-white/50 border border-white/15 bg-white/5 px-2 py-1 rounded-full">NO POLYLINE</span>
                   )}
                 </div>
 
@@ -405,14 +469,28 @@ export default function MissionClient() {
                     {/* Route */}
                     {svg.d ? (
                       <>
-                        <path d={svg.d} stroke="rgba(255,255,255,0.25)" strokeWidth="8" fill="none" strokeLinejoin="round" strokeLinecap="round" />
-                        <path d={svg.d} stroke="rgba(255,255,255,0.95)" strokeWidth="3" fill="none" strokeLinejoin="round" strokeLinecap="round" filter="url(#glow)" />
+                        <path
+                          d={svg.d}
+                          stroke="rgba(255,255,255,0.25)"
+                          strokeWidth="8"
+                          fill="none"
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d={svg.d}
+                          stroke="rgba(255,255,255,0.95)"
+                          strokeWidth="3"
+                          fill="none"
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
+                          filter="url(#glow)"
+                        />
 
                         {/* Start/Finish dots */}
                         {points.length > 1 && (
                           <>
                             <circle cx={Number(svg.d.split(" ")[1])} cy={Number(svg.d.split(" ")[2])} r="5" fill="rgba(52,211,153,0.95)" />
-                            {/* end dot: approximate by taking last coordinate from path string */}
                             <circle
                               cx={Number(svg.d.trim().split(" ").slice(-2)[0])}
                               cy={Number(svg.d.trim().split(" ").slice(-1)[0])}
@@ -432,7 +510,7 @@ export default function MissionClient() {
 
                 <div className="mt-5 text-xs text-white/55 leading-relaxed">
                   Pro tip: make a new route in Strava, copy its URL, then open:
-                  <span className="text-white/75"> /challenge?routeId=ROUTE_ID&pace=4:45</span>
+                  <span className="text-white/75"> /challenge?routeId=ROUTE_ID&amp;pace=4:45</span>
                 </div>
               </div>
             </div>
@@ -442,9 +520,7 @@ export default function MissionClient() {
               <div>
                 <span className="text-white/80">Reminder:</span> Warm up. Fuel. No hero starts.
               </div>
-              <div className="tracking-[0.25em] text-xs text-white/45">
-                THIS MESSAGE WILL NOT SELF-DESTRUCT (YOUR QUADS MIGHT)
-              </div>
+              <div className="tracking-[0.25em] text-xs text-white/45">THIS MESSAGE WILL NOT SELF-DESTRUCT (YOUR QUADS MIGHT)</div>
             </div>
           </div>
         </div>
@@ -482,5 +558,14 @@ function CopyLinkButton({ label, getText }: { label: string; getText: () => stri
     >
       {copied ? "Copied ✓" : label}
     </button>
+  );
+}
+
+function CountdownBlock({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-center">
+      <div className="text-[10px] tracking-[0.35em] text-white/55">{label}</div>
+      <div className="mt-2 text-2xl font-semibold tabular-nums">{String(value).padStart(2, "0")}</div>
+    </div>
   );
 }
