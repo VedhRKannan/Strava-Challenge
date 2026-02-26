@@ -79,20 +79,20 @@ function formatHMS(totalSeconds: number): string {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-function nextSaturdayAt7am(now = new Date()): Date {
+function nextSundayAt7am(now = new Date()): Date {
   // JS: Sunday=0 ... Saturday=6
   const d = new Date(now);
   d.setMilliseconds(0);
 
   const day = d.getDay();
-  const daysUntilSaturday = (6 - day + 7) % 7;
+  const daysUntilSunday = (0 - day + 7) % 7;
 
   const target = new Date(d);
-  target.setDate(d.getDate() + daysUntilSaturday);
+  target.setDate(d.getDate() + daysUntilSunday);
   target.setHours(7, 0, 0, 0);
 
-  // If it's already Saturday and past 07:00, go to next Saturday
-  if (daysUntilSaturday === 0 && now.getTime() >= target.getTime()) {
+  // If it's already Sunday and past 07:00, go to next Sunday
+  if (daysUntilSunday === 0 && now.getTime() >= target.getTime()) {
     target.setDate(target.getDate() + 7);
   }
   return target;
@@ -159,26 +159,25 @@ export default function MissionClient() {
     return getQueryParam("pace") || process.env.NEXT_PUBLIC_GOAL_PACE || "4:45";
   });
 
-  // Countdown to next Saturday 07:00 (local)
-  const [countdownTarget, setCountdownTarget] = useState<Date>(() => nextSaturdayAt7am(new Date()));
+  // Countdown to next Sunday 07:00 (local)
+  const [countdownTarget, setCountdownTarget] = useState<Date>(() => nextSundayAt7am(new Date()));
   const [msLeft, setMsLeft] = useState<number>(() => countdownTarget.getTime() - Date.now());
 
   useEffect(() => {
     const id = window.setInterval(() => {
       const now = new Date();
 
-      // roll the target forward if we've passed it
-      setCountdownTarget((prev) => (now.getTime() >= prev.getTime() ? nextSaturdayAt7am(now) : prev));
-
-      // compute ms left against the *latest* target (avoid stale closure)
-      setMsLeft(() => {
-        const target = countdownTarget;
-        return target.getTime() - now.getTime();
+      // Ensure target rolls forward after passing it
+      setCountdownTarget((prev) => {
+        const next = now.getTime() >= prev.getTime() ? nextSundayAt7am(now) : prev;
+        // Keep msLeft consistent with the computed target for this tick
+        setMsLeft(next.getTime() - now.getTime());
+        return next;
       });
     }, 250);
 
     return () => window.clearInterval(id);
-  }, [countdownTarget]);
+  }, []);
 
   const cd = useMemo(() => formatCountdown(msLeft), [msLeft]);
 
@@ -253,7 +252,6 @@ export default function MissionClient() {
   const svg = useMemo(() => buildSvgPath(points, 640, 360, 20), [points]);
 
   function playBeep() {
-    // Optional: uses a tiny base64 beep. If autoplay is blocked, user can click.
     if (!audioRef.current) return;
     audioRef.current.currentTime = 0;
     audioRef.current.play().catch(() => {});
@@ -282,7 +280,7 @@ export default function MissionClient() {
 
       <main className="relative z-10 max-w-5xl mx-auto px-6 py-14">
         <div className="flex items-center justify-between gap-4">
-          <div className="text-xs tracking-[0.35em] text-white/60">LONG RUN // TEAM RUN BRIEFING</div>
+          <div className="text-xs tracking-[0.35em] text-white/60">LONG RUN // TEAM BRIEFING</div>
           <div className="text-xs text-white/50">{new Date().toLocaleString()}</div>
         </div>
 
@@ -324,7 +322,7 @@ export default function MissionClient() {
                 <div>
                   <div className="text-xs tracking-[0.35em] text-white/55">MISSION START</div>
                   <div className="mt-2 text-lg font-semibold">
-                    Saturday · 07:00
+                    Sunday · 07:00
                     <span className="text-white/50 text-sm font-normal"> (local)</span>
                   </div>
                 </div>
@@ -469,23 +467,8 @@ export default function MissionClient() {
                     {/* Route */}
                     {svg.d ? (
                       <>
-                        <path
-                          d={svg.d}
-                          stroke="rgba(255,255,255,0.25)"
-                          strokeWidth="8"
-                          fill="none"
-                          strokeLinejoin="round"
-                          strokeLinecap="round"
-                        />
-                        <path
-                          d={svg.d}
-                          stroke="rgba(255,255,255,0.95)"
-                          strokeWidth="3"
-                          fill="none"
-                          strokeLinejoin="round"
-                          strokeLinecap="round"
-                          filter="url(#glow)"
-                        />
+                        <path d={svg.d} stroke="rgba(255,255,255,0.25)" strokeWidth="8" fill="none" strokeLinejoin="round" strokeLinecap="round" />
+                        <path d={svg.d} stroke="rgba(255,255,255,0.95)" strokeWidth="3" fill="none" strokeLinejoin="round" strokeLinecap="round" filter="url(#glow)" />
 
                         {/* Start/Finish dots */}
                         {points.length > 1 && (
